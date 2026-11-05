@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智选电商 · 个性化推荐系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-6 { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+    .fade-enter-active, .fade-leave-active { transition: opacity .2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .slide-enter-active, .slide-leave-active { transition: transform .25s ease; }
+    .slide-enter-from, .slide-leave-to { transform: translateX(100%); }
+    .toast-enter-active, .toast-leave-active { transition: all .3s ease; }
+    .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-12px); }
+    .card { transition: transform .2s ease, box-shadow .2s ease; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -8px rgba(15, 23, 42, .18); }
+    .skeleton { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%); background-size: 400% 100%; animation: sk 1.4s ease infinite; }
+    @keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+<div id="app" v-cloak>
+
+  <!-- ===================== 顶部导航 ===================== -->
+  <header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-2 mr-2 cursor-pointer" @click="clearSearch">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-orange-400 flex items-center justify-center text-white font-bold shadow">智</div>
+        <div class="leading-tight">
+          <div class="font-bold text-slate-900">智选电商</div>
+          <div class="text-xs text-slate-500">个性化推荐系统</div>
+        </div>
+      </div>
+
+      <!-- 搜索 -->
+      <form class="flex flex-1 min-w-[280px] items-center gap-2" @submit.prevent="doSearch">
+        <div class="flex flex-1 items-center bg-slate-100 rounded-full px-4 focus-within:ring-2 focus-within:ring-rose-400">
+          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input v-model.trim="searchQ" type="text" maxlength="100" placeholder="搜索商品，如 serum、lipstick、shampoo…"
+                 class="flex-1 bg-transparent py-2 px-2 text-sm outline-none" />
+        </div>
+        <select v-model="searchCategory" class="bg-slate-100 rounded-full px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-400">
+          <option value="">全部分类</option>
+          <option v-for="c in categories" :key="c.name" :value="c.name">{{ c.name }}（{{ c.count.toLocaleString() }}）</option>
+        </select>
+        <button type="submit" class="px-4 py-2 rounded-full bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium shadow-sm">搜索</button>
+        <button type="button" @click="clearSearch" class="px-3 py-2 rounded-full bg-white border border-slate-200 hover:bg-slate-50 text-sm">重置</button>
+      </form>
+
+      <!-- 账号切换 + 足迹 -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-full pl-3 pr-1 py-1">
+          <span class="text-xs font-semibold text-indigo-700 whitespace-nowrap">体验账号</span>
+          <select v-model="currentUserId" @change="onUserChange"
+                  class="bg-white rounded-full px-2 py-1 text-sm font-medium text-indigo-900 outline-none max-w-[230px]">
+            <option v-for="u in users" :key="u.user_id" :value="u.user_id">
+              {{ u.is_cold_start_account ? '🌱 ' : '👤 ' }}{{ u.username }}（{{ u.interaction_count }} 条行为）
+            </option>
+          </select>
+        </div>
+        <button v-if="isColdStartAccount && currentUser && currentUser.interaction_count > 0" @click="resetColdStart"
+                class="px-3 py-2 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-800 text-sm whitespace-nowrap" title="清空该测试账号的全部行为">
+          ↺ 重置为新用户
+        </button>
+        <button @click="openHistory" class="px-3 py-2 rounded-full bg-slate-900 hover:bg-slate-700 text-white text-sm whitespace-nowrap">
+          👣 我的足迹/收藏
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-8">
+
+    <!-- ===================== 推荐策略状态栏 ===================== -->
+    <transition name="fade" mode="out-in">
+      <div v-if="recLoading && !rec.items.length" key="l" class="h-16 rounded-2xl skeleton"></div>
+      <div v-else-if="rec.is_cold_start" key="c"
+           class="rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 to-yellow-50 px-5 py-4 text-amber-900 shadow-sm">
+        🌱 当前为<b>【新用户冷启动模式】</b>：该账号暂无历史行为，系统已自动启用<b>「贝叶斯加权热门算法」</b>。
+        👉 试试点开下方任意商品打个 5 星或点击收藏，立即体验个性化推荐的实时变化！
+      </div>
+      <div v-else key="p"
+           class="rounded-2xl border border-emerald-300 bg-gradient-to-r from-emerald-50 to-indigo-50 px-5 py-4 text-emerald-900 shadow-sm">
+        ✨ 当前为<b>【千人千面个性化模式】</b>：系统已结合您的历史偏好（最近 {{ rec.based_on_count }} 条正向行为），
+        通过<b>「Content TF-IDF + Item-CF 混合推荐引擎」</b>为您实时生成专属推荐。
+      </div>
+    </transition>
+
+    <!-- ===================== 猜你喜欢 ===================== -->
+    <section>
+      <div class="flex items-end justify-between mb-4">
+        <div>
+          <h2 class="text-xl font-bold text-slate-900">💝 猜你喜欢 · 为您专属定制</h2>
+          <p class="text-sm text-slate-500 mt-1">当前账号：{{ currentUser ? currentUser.username : '-' }}　·　每次打分/收藏后实时更新</p>
+        </div>
+        <span v-if="recLoading" class="text-sm text-slate-400 animate-pulse">推荐计算中…</span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <template v-if="recLoading && !rec.items.length">
+          <div v-for="n in 8" :key="n" class="h-80 rounded-2xl skeleton"></div>
+        </template>
+        <div v-for="item in rec.items" :key="'r-' + item.item_id" @click="openDetail(item.item_id)"
+             class="card bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm cursor-pointer flex flex-col">
+          <div class="relative aspect-square bg-slate-50">
+            <img :src="item.image_url" @error="onImgError" loading="lazy" class="w-full h-full object-contain p-3" :alt="item.title" />
+            <span class="absolute top-2 left-2 text-[11px] px-2 py-0.5 rounded-full bg-white/90 text-slate-600 border">{{ item.sub_category }}</span>
+          </div>
+          <div class="p-3 flex flex-col flex-1">
+            <h3 class="text-sm font-medium line-clamp-2 min-h-[2.5rem]" :title="item.title">{{ item.title }}</h3>
+            <div class="mt-2 flex items-center justify-between">
+              <span :class="item.price != null ? 'text-rose-600 font-bold' : 'text-slate-400 text-sm'">{{ fmtPrice(item.price) }}</span>
+              <span class="text-xs text-slate-500"><span class="text-amber-500">★</span> {{ item.avg_rating.toFixed(1) }} · {{ fmtNum(item.rating_num) }}评</span>
+            </div>
+            <div class="mt-3 pt-2 border-t border-dashed border-slate-200">
+              <div class="text-xs leading-snug px-2 py-1.5 rounded-lg"
+                   :class="rec.is_cold_start || (item.reason || '').startsWith('🔥') ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-700'">
+                {{ item.reason }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 热门榜 / 搜索结果 ===================== -->
+    <section>
+      <div class="flex items-end justify-between mb-4">
+        <div v-if="!searchMode">
+          <h2 class="text-xl font-bold text-slate-900">🏆 全站热销风云榜 · 贝叶斯高分精选</h2>
+          <p class="text-sm text-slate-500 mt-1">W = v/(v+m)·R + m/(v+m)·C，兼顾评分高低与评价人数</p>
+        </div>
+        <div v-else>
+          <h2 class="text-xl font-bold text-slate-900">🔍 搜索结果</h2>
+          <p class="text-sm text-slate-500 mt-1">
+            <span v-if="activeSearch.q">关键词「{{ activeSearch.q }}」</span>
+            <span v-if="activeSearch.category">　分类「{{ activeSearch.category }}」</span>
+            　共 {{ searchItems.length }} 件（按热度排序，最多展示 48 件）
+          </p>
+        </div>
+        <button v-if="searchMode" @click="clearSearch" class="px-3 py-1.5 rounded-full border border-slate-300 bg-white hover:bg-slate-50 text-sm">✕ 清除筛选</button>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <template v-if="listLoading">
+          <div v-for="n in 8" :key="n" class="h-72 rounded-2xl skeleton"></div>
+        </template>
+        <template v-else>
+          <div v-for="(item, idx) in displayList" :key="'h-' + item.item_id" @click="openDetail(item.item_id)"
+               class="card bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm cursor-pointer flex flex-col">
+            <div class="relative aspect-square bg-slate-50">
+              <img :src="item.image_url" @error="onImgError" loading="lazy" class="w-full h-full object-contain p-3" :alt="item.title" />
+              <span v-if="!searchMode" class="absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shadow"
+                    :class="idx < 3 ? 'bg-gradient-to-br from-rose-500 to-orange-400' : 'bg-slate-500'">{{ idx + 1 }}</span>
+              <span class="absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded-full bg-rose-500 text-white shadow">Hot {{ item.hot_score.toFixed(3) }}</span>
+            </div>
+            <div class="p-3 flex flex-col flex-1">
+              <h3 class="text-sm font-medium line-clamp-2 min-h-[2.5rem]" :title="item.title">{{ item.title }}</h3>
+              <div class="mt-auto pt-2 flex items-center justify-between">
+                <span :class="item.price != null ? 'text-rose-600 font-bold' : 'text-slate-400 text-sm'">{{ fmtPrice(item.price) }}</span>
+                <span class="text-xs text-slate-500"><span class="text-amber-500">★</span> {{ item.avg_rating.toFixed(1) }} · {{ fmtNum(item.rating_num) }}评</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="searchMode && !searchItems.length" class="col-span-full text-center text-slate-400 py-16">
+            没有找到相关商品，换个关键词试试～
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <footer class="text-center text-xs text-slate-400 py-6">
+      智选电商 · PostgreSQL + FastAPI + Vue 3　|　贝叶斯热门 · TF-IDF 内容相似 · Item-CF 协同过滤 · 实时反馈闭环
+    </footer>
+  </main>
+
+  <!-- ===================== 商品详情弹窗 ===================== -->
+  <transition name="fade">
+    <div v-if="detailOpen" class="fixed inset-0 z-40 bg-slate-900/50 flex items-start md:items-center justify-center p-3 md:p-6 overflow-y-auto"
+         @click.self="closeDetail">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-5xl relative my-4" ref="modalBox">
+        <button @click="closeDetail" class="absolute top-3 right-3 w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 z-10">✕</button>
+
+        <div v-if="detailLoading && !detail" class="p-10 grid md:grid-cols-2 gap-8">
+          <div class="aspect-square rounded-2xl skeleton"></div>
+          <div class="space-y-4"><div class="h-8 skeleton rounded"></div><div class="h-6 w-1/2 skeleton rounded"></div><div class="h-40 skeleton rounded"></div></div>
+        </div>
+
+        <div v-if="detail" class="p-5 md:p-8" :class="detailLoading ? 'opacity-60 pointer-events-none' : ''">
+          <!-- 上半部分 -->
+          <div class="grid md:grid-cols-2 gap-6 md:gap-8">
+            <div class="bg-slate-50 rounded-2xl aspect-square flex items-center justify-center">
+              <img :src="detail.image_url" @error="onImgError" class="max-w-full max-h-full object-contain p-6" :alt="detail.title" />
+            </div>
+            <div class="flex flex-col">
+              <div class="flex flex-wrap gap-2 mb-2">
+                <span class="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200">{{ detail.sub_category }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{{ detail.category }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">Hot Score {{ detail.hot_score.toFixed(4) }}</span>
+              </div>
+              <h2 class="text-lg md:text-xl font-bold text-slate-900 leading-snug pr-8">{{ detail.title }}</h2>
+              <div class="mt-3 flex items-baseline gap-4">
+                <span :class="detail.price != null ? 'text-2xl text-rose-600 font-bold' : 'text-lg text-slate-400'">{{ fmtPrice(detail.price) }}</span>
+                <span class="text-sm text-slate-500"><span class="text-amber-500">{{ starsText(detail.avg_rating) }}</span> {{ detail.avg_rating.toFixed(1) }} 分 · {{ fmtNum(detail.rating_num) }} 人评价</span>
+              </div>
+              <p class="mt-3 text-sm text-slate-600 leading-relaxed line-clamp-6">{{ detail.description || '暂无商品简介。' }}</p>
+
+              <!-- 交互任务面板 -->
+              <div class="mt-auto pt-4">
+                <div class="rounded-2xl border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-rose-50 p-4">
+                  <div class="text-sm font-bold text-indigo-900 mb-3">🎯 交互任务（反馈将实时驱动「猜你喜欢」）</div>
+                  <div class="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <div class="text-xs text-slate-500 mb-1">任务 A：星级评价</div>
+                      <div class="flex items-center gap-1" @mouseleave="hoverStar = 0">
+                        <button v-for="s in 5" :key="s" @mouseenter="hoverStar = s" @click="rate(s)" :disabled="submitting"
+                                class="text-3xl leading-none transition-transform hover:scale-110"
+                                :class="s <= (hoverStar || detail.user_rating || 0) ? 'text-amber-400' : 'text-slate-300'">★</button>
+                        <span class="ml-2 text-sm text-slate-600">
+                          {{ hoverStar ? hoverStar + ' 星' : (detail.user_rating ? '已评 ' + detail.user_rating + ' 星' : '未评分') }}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-slate-500 mb-1">任务 B：一键收藏</div>
+                      <button @click="toggleFav" :disabled="submitting"
+                              class="px-4 py-2 rounded-full text-sm font-medium shadow-sm transition"
+                              :class="detail.user_is_fav ? 'bg-rose-500 text-white hover:bg-rose-600' : 'bg-white border border-rose-300 text-rose-600 hover:bg-rose-50'">
+                        {{ detail.user_is_fav ? '💖 已收藏（点击取消）' : '❤️ 收藏该商品（记5分偏好）' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 下半部分：看了又看 -->
+          <div class="mt-8">
+            <h3 class="text-base font-bold text-slate-900 mb-3">👀 看了该商品的人还喜欢<span class="text-sm font-normal text-slate-500">（Content + Item-CF 混合相似度推荐）</span></h3>
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <template v-if="similarLoading">
+                <div v-for="n in 6" :key="n" class="h-48 rounded-xl skeleton"></div>
+              </template>
+              <div v-else v-for="s in similar" :key="'s-' + s.item_id" @click="openDetail(s.item_id, true)"
+                   class="card bg-white border border-slate-100 rounded-xl overflow-hidden cursor-pointer shadow-sm">
+                <div class="relative aspect-square bg-slate-50">
+                  <img :src="s.image_url" @error="onImgError" loading="lazy" class="w-full h-full object-contain p-2" :alt="s.title" />
+                  <span v-if="s.score != null" class="absolute bottom-1 left-1 text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-500 text-white shadow">匹配度 {{ (s.score * 100).toFixed(1) }}%</span>
+                  <span v-else class="absolute bottom-1 left-1 text-[11px] px-1.5 py-0.5 rounded-md bg-slate-500 text-white shadow">同类热门</span>
+                </div>
+                <div class="p-2">
+                  <div class="text-xs line-clamp-2 min-h-[2rem]" :title="s.title">{{ s.title }}</div>
+                  <div class="text-xs text-slate-500 mt-1"><span class="text-amber-500">★</span> {{ s.avg_rating.toFixed(1) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </transition>
+
+  <!-- ===================== 足迹抽屉 ===================== -->
+  <transition name="fade">
+    <div v-if="historyOpen" class="fixed inset-0 z-40 bg-slate-900/40" @click="historyOpen = false"></div>
+  </transition>
+  <transition name="slide">
+    <aside v-if="historyOpen" class="fixed top-0 right-0 z-50 h-full w-full max-w-md bg-white shadow-2xl flex flex-col">
+      <div class="px-5 py-4 border-b flex items-center justify-between">
+        <div>
+          <div class="font-bold text-slate-900">👣 我的足迹与收藏</div>
+          <div class="text-xs text-slate-500">{{ currentUser ? currentUser.username : '' }} · 共 {{ history.total }} 条行为（展示最近 30 条）</div>
+        </div>
+        <button @click="historyOpen = false" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200">✕</button>
+      </div>
+      <div class="px-5 pt-3 flex gap-2">
+        <button v-for="t in historyTabs" :key="t.key" @click="historyTab = t.key"
+                class="px-3 py-1 rounded-full text-sm" :class="historyTab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'">{{ t.label }}</button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-5 space-y-3">
+        <div v-if="historyLoading" v-for="n in 5" :key="n" class="h-20 rounded-xl skeleton"></div>
+        <div v-else-if="!filteredHistory.length" class="text-center text-slate-400 py-16">暂无记录，去逛逛吧～</div>
+        <div v-else v-for="h in filteredHistory" :key="'hi-' + h.item_id" @click="historyOpen = false; openDetail(h.item_id)"
+             class="flex gap-3 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 cursor-pointer">
+          <img :src="h.image_url" @error="onImgError" class="w-16 h-16 object-contain bg-slate-50 rounded-lg flex-shrink-0" />
+          <div class="min-w-0 flex-1">
+            <div class="text-sm line-clamp-2">{{ h.title }}</div>
+            <div class="mt-1 flex items-center gap-2 text-xs">
+              <span class="text-amber-500">{{ '★'.repeat(Math.round(h.user_rating)) }}</span>
+              <span class="text-slate-600">{{ h.user_rating }} 星</span>
+              <span v-if="h.is_fav" class="px-1.5 rounded bg-rose-100 text-rose-600">已收藏</span>
+              <span class="ml-auto text-slate-400">{{ fmtTime(h.timestamp) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </transition>
+
+  <!-- ===================== Toast ===================== -->
+  <div class="fixed top-20 right-4 z-[60] space-y-2">
+    <transition-group name="toast">
+      <div v-for="t in toasts" :key="t.id" class="px-4 py-3 rounded-xl shadow-lg text-sm max-w-sm"
+           :class="t.type === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-900 text-white'">{{ t.msg }}</div>
+    </transition-group>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
+const PLACEHOLDER = "data:image/svg+xml;utf8," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="100%" height="100%" fill="#f1f5f9"/>' +
+  '<text x="50%" y="50%" fill="#94a3b8" font-size="18" text-anchor="middle" dominant-baseline="middle">暂无图片</text></svg>');
+
+async function api(url, options = {}) {
+  const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).detail || msg; } catch (e) {}
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  return res.json();
+}
+
+createApp({
+  setup() {
+    const users = ref([]);
+    const currentUserId = ref(localStorage.getItem("recsys_user") || "cold_start_user");
+    const categories = ref([]);
+
+    const rec = reactive({ is_cold_start: true, based_on_count: 0, items: [] });
+    const recLoading = ref(false);
+    let recToken = 0;
+
+    const hotItems = ref([]);
+    const searchItems = ref([]);
+    const listLoading = ref(false);
+    const searchQ = ref("");
+    const searchCategory = ref("");
+    const searchMode = ref(false);
+    const activeSearch = reactive({ q: "", category: "" });
+
+    const detailOpen = ref(false);
+    const detail = ref(null);
+    const detailLoading = ref(false);
+    const similar = ref([]);
+    const similarLoading = ref(false);
+    const hoverStar = ref(0);
+    const submitting = ref(false);
+    const modalBox = ref(null);
+    let detailToken = 0;
+
+    const historyOpen = ref(false);
+    const history = reactive({ total: 0, items: [] });
+    const historyLoading = ref(false);
+    const historyTab = ref("all");
+    const historyTabs = [{ key: "all", label: "全部足迹" }, { key: "fav", label: "我的收藏" }, { key: "rate", label: "我的评分" }];
+
+    const toasts = ref([]);
+    let toastId = 0;
+
+    const currentUser = computed(() => users.value.find(u => u.user_id === currentUserId.value));
+    const isColdStartAccount = computed(() => currentUser.value && currentUser.value.is_cold_start_account);
+    const displayList = computed(() => (searchMode.value ? searchItems.value : hotItems.value));
+    const filteredHistory = computed(() => {
+      if (historyTab.value === "fav") return history.items.filter(h => h.is_fav);
+      if (historyTab.value === "rate") return history.items.filter(h => h.user_action === "rate");
+      return history.items;
+    });
+
+    function toast(msg, type = "ok", ms = 3200) {
+      const id = ++toastId;
+      toasts.value.push({ id, msg, type });
+      setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id); }, ms);
+    }
+    const onImgError = e => { if (e.target.src !== PLACEHOLDER) e.target.src = PLACEHOLDER; };
+    const fmtPrice = p => (p == null ? "暂无报价" : "$" + Number(p).toFixed(2));
+    const fmtNum = n => (n >= 10000 ? (n / 10000).toFixed(1) + "万" : String(n));
+    const starsText = r => "★".repeat(Math.round(r)) + "☆".repeat(5 - Math.round(r));
+    const fmtTime = ts => {
+      const d = new Date(Number(ts));
+      const pad = x => String(x).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    async function loadUsers() {
+      users.value = await api("/api/users/sample");
+      if (!users.value.some(u => u.user_id === currentUserId.value) && users.value.length) {
+        currentUserId.value = users.value[0].user_id;
+      }
+    }
+    function setUserCount(n) {
+      const u = currentUser.value;
+      if (u) u.interaction_count = n;
+    }
+
+    async function loadRecommend() {
+      const token = ++recToken;
+      const uid = currentUserId.value;
+      recLoading.value = true;
+      try {
+        const data = await api(`/api/recommend/user/${encodeURIComponent(uid)}?limit=12`);
+        if (token !== recToken) return; // 丢弃过期请求，防止切换用户时结果错乱
+        Object.assign(rec, data);
+      } catch (e) {
+        if (token === recToken) toast("推荐加载失败：" + e.message, "error");
+      } finally {
+        if (token === recToken) recLoading.value = false;
+      }
+    }
+
+    async function loadHot() {
+      listLoading.value = true;
+      try { hotItems.value = await api("/api/products/hot?limit=12"); }
+      catch (e) { toast("热门榜加载失败：" + e.message, "error"); }
+      finally { listLoading.value = false; }
+    }
+
+    async function doSearch() {
+      if (!searchQ.value && !searchCategory.value) { clearSearch(); return; }
+      listLoading.value = true;
+      searchMode.value = true;
+      activeSearch.q = searchQ.value;
+      activeSearch.category = searchCategory.value;
+      try {
+        const params = new URLSearchParams({ q: searchQ.value, category: searchCategory.value, limit: 48 });
+        const data = await api(`/api/products/search?${params}`);
+        searchItems.value = data.items;
+      } catch (e) { toast("搜索失败：" + e.message, "error"); }
+      finally { listLoading.value = false; }
+    }
+    function clearSearch() {
+      searchQ.value = ""; searchCategory.value = ""; searchMode.value = false;
+      activeSearch.q = ""; activeSearch.category = "";
+    }
+
+    function onUserChange() {
+      localStorage.setItem("recsys_user", currentUserId.value);
+      rec.items = [];
+      loadRecommend();
+      if (historyOpen.value) loadHistory();
+      toast(`已切换到账号：${currentUser.value ? currentUser.value.username : currentUserId.value}`);
+    }
+
+    async function openDetail(itemId, fromSimilar = false) {
+      const token = ++detailToken;
+      detailOpen.value = true;
+      detailLoading.value = true;
+      similarLoading.value = true;
+      hoverStar.value = 0;
+      if (!fromSimilar) detail.value = null;
+      const uid = encodeURIComponent(currentUserId.value);
+      try {
+        const [d, s] = await Promise.all([
+          api(`/api/products/${encodeURIComponent(itemId)}?user_id=${uid}`),
+          api(`/api/recommend/similar/${encodeURIComponent(itemId)}?limit=6`),
+        ]);
+        if (token !== detailToken) return;
+        detail.value = d;
+        similar.value = s.items;
+        await nextTick();
+        if (fromSimilar && modalBox.value) modalBox.value.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {
+        if (token === detailToken) { toast("商品加载失败：" + e.message, "error"); if (!detail.value) detailOpen.value = false; }
+      } finally {
+        if (token === detailToken) { detailLoading.value = false; similarLoading.value = false; }
+      }
+    }
+    function closeDetail() { detailOpen.value = false; detailToken++; }
+
+    async function submitInteraction(payload, okMsg) {
+      if (!detail.value || submitting.value) return;
+      submitting.value = true;
+      try {
+        const res = await api("/api/interactions", {
+          method: "POST",
+          body: JSON.stringify({ user_id: currentUserId.value, item_id: detail.value.item_id, ...payload }),
+        });
+        detail.value.user_rating = res.user_rating;
+        detail.value.user_is_fav = res.user_is_fav;
+        detail.value.user_action = res.user_action;
+        setUserCount(res.interaction_count);
+        toast(okMsg);
+        loadRecommend();                 // 实时刷新「猜你喜欢」
+        if (historyOpen.value) loadHistory();
+      } catch (e) {
+        toast("操作失败：" + e.message, "error");
+      } finally {
+        submitting.value = false;
+      }
+    }
+    const rate = s => submitInteraction({ rating: s, action_type: "rate" },
+      `🎉 已评 ${s} 星！首页【猜你喜欢】推荐列表已为您实时更新！`);
+    const toggleFav = () => detail.value.user_is_fav
+      ? submitInteraction({ action_type: "unfav" }, "已取消收藏，推荐列表已同步更新")
+      : submitInteraction({ rating: 5.0, action_type: "fav" }, "🎉 交互已记录！首页【猜你喜欢】推荐列表已为您实时更新！");
+
+    async function loadHistory() {
+      historyLoading.value = true;
+      try {
+        const data = await api(`/api/users/${encodeURIComponent(currentUserId.value)}/history?limit=30`);
+        history.total = data.total; history.items = data.items;
+      } catch (e) { toast("足迹加载失败：" + e.message, "error"); }
+      finally { historyLoading.value = false; }
+    }
+    function openHistory() { historyOpen.value = true; historyTab.value = "all"; loadHistory(); }
+
+    async function resetColdStart() {
+      if (!confirm("确定清空该测试账号的全部行为，恢复为冷启动新用户吗？")) return;
+      try {
+        await api(`/api/users/${encodeURIComponent(currentUserId.value)}/interactions`, { method: "DELETE" });
+        setUserCount(0);
+        toast("🌱 已重置为新用户，冷启动模式已恢复");
+        loadRecommend();
+        if (historyOpen.value) loadHistory();
+      } catch (e) { toast("重置失败：" + e.message, "error"); }
+    }
+
+    onMounted(async () => {
+      api("/api/categories").then(c => (categories.value = c)).catch(() => {});
+      loadHot();
+      try { await loadUsers(); } catch (e) { toast("用户列表加载失败：" + e.message, "error"); }
+      loadRecommend();
+      window.addEventListener("keydown", e => { if (e.key === "Escape") { closeDetail(); historyOpen.value = false; } });
+    });
+
+    return {
+      users, currentUserId, currentUser, isColdStartAccount, categories,
+      rec, recLoading, hotItems, searchItems, listLoading, displayList,
+      searchQ, searchCategory, searchMode, activeSearch,
+      detailOpen, detail, detailLoading, similar, similarLoading, hoverStar, submitting, modalBox,
+      historyOpen, history, historyLoading, historyTab, historyTabs, filteredHistory, toasts,
+      onImgError, fmtPrice, fmtNum, starsText, fmtTime,
+      doSearch, clearSearch, onUserChange, openDetail, closeDetail, rate, toggleFav,
+      openHistory, resetColdStart,
+    };
+  },
+}).mount("#app");
+</script>
+</body>
+</html>

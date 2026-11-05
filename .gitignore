@@ -1,0 +1,16 @@
+# 本地配置（含密码）
+config.py
+
+# 数据文件
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
