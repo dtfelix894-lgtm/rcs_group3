@@ -32,11 +32,14 @@ def get_db_params(dbname: str = None) -> dict:
     """返回 psycopg2 / ThreadedConnectionPool 可用的连接参数。"""
     dsn = _first_env("POSTGRES_URL", "DATABASE_URL", "POSTGRES_URL_NON_POOLING")
     if dsn:
-        target = dbname or _first_env("PGDATABASE", "POSTGRES_DATABASE", "DB_NAME")
-        if target:
-            current = urlparse(dsn).path.lstrip("/")
-            if target != current:
-                dsn = _dsn_with_dbname(dsn, target)
+        if dbname:
+            dsn = _dsn_with_dbname(dsn, dbname)
+        else:
+            neon_db = _first_env("PGDATABASE", "POSTGRES_DATABASE")
+            if neon_db:
+                current = urlparse(dsn).path.lstrip("/")
+                if neon_db != current:
+                    dsn = _dsn_with_dbname(dsn, neon_db)
         return {"dsn": dsn}
 
     host = _first_env("PGHOST", "POSTGRES_HOST", "DB_HOST", default="localhost")

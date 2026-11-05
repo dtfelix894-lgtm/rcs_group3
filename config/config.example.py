@@ -5,7 +5,7 @@ Vercel + Neon 集成时会注入 POSTGRES_URL / PGHOST 等，见 config/connecti
 """
 import os
 
-from .connection import get_db_params, resolve_db_settings
+from config.connection import get_db_params, resolve_db_settings
 
 _settings = resolve_db_settings()
 DB_HOST = _settings["DB_HOST"]
