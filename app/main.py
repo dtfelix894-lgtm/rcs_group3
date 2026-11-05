@@ -19,6 +19,7 @@
 """
 import os
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from decimal import Decimal
@@ -55,15 +56,21 @@ LIST_COLUMNS = """
 
 app = FastAPI(title="智选电商 · 个性化推荐系统", version="1.0.0")
 _pool: Optional[ThreadedConnectionPool] = None
+_pool_lock = threading.Lock()
 
 
 # ----------------------------------------------------------------------------
 # 基础设施：连接池 / 类型转换
 # ----------------------------------------------------------------------------
-@app.on_event("startup")
-def _startup():
+def _ensure_pool() -> ThreadedConnectionPool:
+    """按需创建连接池，避免 Vercel 冷启动时因数据库不可达导致整站 500。"""
     global _pool
-    _pool = ThreadedConnectionPool(minconn=2, maxconn=20, **config.get_db_params())
+    if _pool is not None:
+        return _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ThreadedConnectionPool(minconn=1, maxconn=10, **config.get_db_params())
+    return _pool
 
 
 @app.on_event("shutdown")
@@ -74,7 +81,8 @@ def _shutdown():
 
 @contextmanager
 def get_cursor(commit: bool = False):
-    conn = _pool.getconn()
+    pool = _ensure_pool()
+    conn = pool.getconn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             yield cur
@@ -86,7 +94,7 @@ def get_cursor(commit: bool = False):
         conn.rollback()
         raise
     finally:
-        _pool.putconn(conn)
+        pool.putconn(conn)
 
 
 def to_native(obj):
