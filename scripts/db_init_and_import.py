@@ -10,7 +10,9 @@
   4. 导入完成后创建外键、二级索引，并 ANALYZE
 """
 import html
+import os
 import re
+import sys
 import time
 
 import numpy as np
@@ -18,6 +20,10 @@ import pandas as pd
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_values
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 import config
 

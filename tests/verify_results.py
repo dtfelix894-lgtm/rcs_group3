@@ -5,7 +5,14 @@
   3. 随机抽取 1 个有交互记录的热门商品，打印其 Top-5 相似商品
   4. 相似度覆盖率统计
 """
+import os
+import sys
+
 import psycopg2
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 import config
 

@@ -1,8 +1,10 @@
 # 本地配置（含密码）
 config.py
+config/config.py
 
 # 数据文件
 *.csv
+data/*.csv
 
 # Python
 __pycache__/

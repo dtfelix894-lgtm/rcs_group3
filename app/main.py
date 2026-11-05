@@ -18,6 +18,7 @@
   DELETE /api/users/{user_id}/interactions   重置测试账号（仅限冷启动测试账号）
 """
 import os
+import sys
 import time
 from contextlib import contextmanager
 from decimal import Decimal
@@ -30,10 +31,13 @@ from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 from pydantic import BaseModel, Field
 
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import config
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_DIR = config.STATIC_DIR
 
 POSITIVE_THRESHOLD = 3.5     # 正向反馈阈值
 HISTORY_WINDOW = 15          # 个性化推荐参考的最近正向行为条数

@@ -13,6 +13,8 @@
     - 排除自身，提取相似度 > 0 的 Top-20 写入 item_similarity（JSONB）
 """
 import json
+import os
+import sys
 import time
 
 import numpy as np
@@ -22,6 +24,10 @@ import scipy.sparse as sp
 from psycopg2.extras import execute_values
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 import config
 
