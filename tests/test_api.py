@@ -8,10 +8,15 @@
   6. POST /api/interactions（cold_start_user 给热门商品打 5 星）
   7. GET  /api/recommend/user/cold_start_user（验证切换为个性化推荐 + 打印前 3 个推荐商品及 reason）
   8. GET  /api/products/{item_id}?user_id=cold_start_user & GET /api/recommend/similar/{item_id}
-  9. GET  /api/users/cold_start_user/history
+  9. GET  /api/metrics、/api/users/browse、/api/dashboard/overview、/api/dashboard/similarity-sample
+     GET  /api/users/cold_start_user/history
  10. DELETE /api/users/cold_start_user/interactions（测试结束后恢复冷启动状态，方便前端演示）
 """
+import sys
 import requests
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -109,7 +114,49 @@ def main():
         requests.get(f"{BASE_URL}/api/products/search?q=lotion&category=护肤&limit=24", timeout=10),
         "products/search",
     )
-    print(f"  搜索 q='lotion' & category='护肤' 返回 {srch['count']} 件")
+    print(f"  搜索 q='lotion' & category='护肤' 总命中 total={srch['total']} 件，当前页返回 {srch['count']} 件")
+
+    rnd_user = check(
+        requests.get(f"{BASE_URL}/api/users/random?tier=medium", timeout=10),
+        "users/random",
+    )
+    print(f"  随机抽取中活跃用户: {rnd_user}")
+
+    usr_srch = check(
+        requests.get(f"{BASE_URL}/api/users/search?q=User_AE2&limit=5", timeout=10),
+        "users/search",
+    )
+    print(f"  搜索用户 q='User_AE2' 返回 {len(usr_srch)} 名用户，首位: {usr_srch[0] if usr_srch else None}")
+
+    metrics = check(
+        requests.get(f"{BASE_URL}/api/metrics", timeout=10),
+        "metrics",
+    )
+    print(f"  离线评测接口 /api/metrics 返回 {len(metrics['metrics'])} 条算法消融记录，评测人数: {metrics['eval_users']}")
+
+    browse = check(
+        requests.get(f"{BASE_URL}/api/users/browse?offset=0&limit=5", timeout=30),
+        "users/browse",
+    )
+    assert len(browse["items"]) == 5 and browse["has_more"]
+    print(f"  全库用户分页浏览: total={browse['total']:,}，has_more={browse['has_more']}")
+
+    dash = check(
+        requests.get(f"{BASE_URL}/api/dashboard/overview", timeout=120),
+        "dashboard/overview",
+    )
+    rows = {t["name"]: t["rows"] for t in dash["tables"]}
+    assert rows["products"] > 0 and rows["item_similarity"] > 0
+    assert sum(b["count"] for b in dash["activity"]) == rows["users"]
+    print(f"  数据全景: {rows}，单条行为用户占比 {dash['sparsity']['single_ratio']:.1%}，"
+          f"邻居同类比例 {dash['similarity']['same_category_ratio']:.1%}")
+
+    sample = check(
+        requests.get(f"{BASE_URL}/api/dashboard/similarity-sample?limit=5", timeout=30),
+        "dashboard/similarity-sample",
+    )
+    assert sample["neighbors"] and all(n["item_id"] != sample["base"]["item_id"] for n in sample["neighbors"])
+    print(f"  相似度样例: {sample['base']['title'][:50]} → Top-1 {sample['neighbors'][0]['score']:.3f}")
 
     hist = check(
         requests.get(f"{BASE_URL}/api/users/cold_start_user/history", timeout=10),
